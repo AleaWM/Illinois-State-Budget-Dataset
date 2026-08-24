@@ -82,9 +82,9 @@ amnesty_words <- c("AMNESTY")
 ```{r}
 current_year = 2025
 
-rev_temp <- read_csv(file = paste0("FY", current_year, " Files/rev_temp.csv"))
+rev_temp <- read_csv(file = paste0("data/", "FY", current_year, " Files/rev_temp.csv"))
 
-exp_temp<- read_csv(file = paste0("FY", current_year, " Files/exp_temp.csv"))
+exp_temp<- read_csv(file = paste0("data/", "FY", current_year, " Files/exp_temp.csv"))
 ```
 
 ## Modify Expenditure File
@@ -307,10 +307,10 @@ exp_temp <- exp_temp %>%
     
     group_label = 
       case_when(
-        group == "971"~ "INCOME TAX 1/10 TO LOCAL",
-        group == "972" ~ "PPRT TRANSFER TO LOCAL",
-        group == "975" ~ "MFT TO LOCAL",
-        group == "976" ~ "GST TO LOCAL",
+        group == "971"~ "Income Tax 1/10 to Local",
+        group == "972" ~ "PPRT Transfer to Local",
+        group == "975" ~ "MFT to Local",
+        group == "976" ~ "GST to Local",
         TRUE~as.character(group_label)) )|>
       
       
@@ -327,7 +327,7 @@ exp_temp <- exp_temp %>%
 #exp_temp <- exp_temp %>% filter(in_ff == 1) 
 
 exp_temp <- exp_temp |> 
-  mutate(drop_reason = ifelse(in_ff == 0, "Excluded Fund", drop_reason))
+  mutate(drop_fund = ifelse(in_ff == 0, "Excluded Fund", "Included Fund"))
 ```
 
 **Debt Service**
@@ -339,7 +339,9 @@ Debt Service expenditures include interest payment on both short-term and long-t
 ```{r debt-service}
 # keeping obs for other researchers.
 exp_temp <- exp_temp %>% 
-  mutate(drop_reason = ifelse(
+  mutate(
+    drop_reason = ifelse(in_ff == 0, "Excluded Fund", NA),
+    drop_reason = ifelse(
   (object == "8841" |  object == "8811"), 
   "Debt Escrow or Principal",   # escrow  OR  principal
   drop_reason))
@@ -455,7 +457,7 @@ exp_temp <- exp_temp |>
            case_when(
              group == "416" ~ "Central Management",
              group == "442" ~ "Human Rights",
-             group == "445"  ~ "Illinois Power Agency",
+             group == "445" ~ "Illinois Power Agency",
              group == "452" ~ "Labor",
              group == "458" ~ "State Lottery",
              group == "489" ~ "SERS",
@@ -463,22 +465,22 @@ exp_temp <- exp_temp |>
              group == "482" ~ "Public Health",
              group == "497" ~ "Veterans' Affairs",
              group == "507" ~ "GOMB",
-             group == "901" ~ "STATE PENSION CONTRIBUTION",
-             group == "903" ~ "DEBT SERVICE",
-             group == "910" ~ "LEGISLATIVE"  ,
-             group == "920" ~ "JUDICIAL" ,
-             group == "930" ~ "ELECTED OFFICERS" , 
-             group == "940" ~ "OTHER HEALTH-RELATED", 
-             group == "941" ~ "PUBLIC SAFETY" ,
-             group == "942" ~ "ECON DEVT & INFRASTRUCTURE" ,
-             group == "943" ~ "CENTRAL SERVICES",
-             group == "944" ~ "BUS & PROFESSION REGULATION" ,
-             group == "945" ~ "MEDICAID" ,
-             group == "946" ~ "CAPITAL IMPROVEMENT" , 
-             group == "948" ~ "OTHER DEPARTMENTS" ,
-             group == "949" ~ "OTHER BOARDS & COMMISSIONS" ,
-             group == "959" ~ "K-12 EDUCATION" ,
-             group == "960" ~ "UNIVERSITY EDUCATION" ,
+             group == "901" ~ "State Pension Contribution",
+             group == "903" ~ "Debt Service",
+             group == "910" ~ "Legistlative"  ,
+             group == "920" ~ "Judicial" ,
+             group == "930" ~ "Elected Officers" , 
+             group == "940" ~ "Other Health-related", ## Not used, right? 
+             group == "941" ~ "Public Safety" ,
+             group == "942" ~ "Econ. Devt. & Infrastructure" ,
+             group == "943" ~ "Central Services",
+             group == "944" ~ "Bus & Professional Regulation" ,
+             group == "945" ~ "Medicaid" ,
+             group == "946" ~ "Capital Improvement" , 
+             group == "948" ~ "Other Departments" ,
+             group == "949" ~ "Other Boards & Commissions" ,
+             group == "959" ~ "K-12 Education" ,
+             group == "960" ~ "University Education" ,
              group == agency ~ as.character(agency_name),
              TRUE ~ "Check name"),
          year = fy)
@@ -495,7 +497,7 @@ exp_temp <- exp_temp |>
            ),
          federal_funded = case_when(
            fund_cat_name == "Federal Trust Funds" ~ "Federal Funds",
-           group_name == "MEDICAID" & fund_cat_name == "General Funds" ~ "Federal Funds",
+           group_name == "Medicaid" & fund_cat_name == "General Funds" ~ "Federal Funds",
           T ~ "State Funds"
            
          ))
@@ -506,7 +508,22 @@ exp_temp |> filter(group_name == "Check name")
 
 ```
 
-::: callout-important
+### Fill in Appropriation labels for  early years of data
+
+Labels for appropriations were not included in the earliest years' datasets. Grouping only by appropriation number is not sufficient due to repeated labels used with the same appropriation number. However, when grouped by agency, appropriation organization, and fund number, then there are very few conflicting appropriation labels used with distinct appropriation numbers. The code below fills in missing appropriation labels for the early years of the dataset using the most recent label used within each distinct agency, organization, and fund combination. 
+
+There are still some remaining NAs.
+
+```{r}
+exp_temp <- exp_temp |>
+  mutate(approp_number = obj_seq_type) |>
+  group_by(agency, appr_org, fund) |> 
+  arrange(desc(year)) |>
+    fill(wh_approp_name, .direction = "downup") %>%
+ungroup()
+```
+
+::: { .callout-important appearance="minimal" icon="false"}
 All expenditures recoded but not aggregated: Allows for inspection of individual expenditures within larger categories. This stage of the data is extremely useful for investigating how individual items have been coded before they are aggregated into larger categories.
 :::
 
@@ -540,9 +557,6 @@ rev_temp <- rev_temp |>
 ```{r}
 #| label: create-rev-federal-transfers
 
-rev_temp <- rev_temp |> 
-  mutate(drop_reason = ifelse(in_ff == "0", 
-                               "Excluded Fund", NA))
 
 rev_temp <- rev_temp |> 
   mutate(
@@ -555,6 +569,16 @@ rev_temp <- rev_temp |>
     rev_type = ifelse(rev_type=="9", "09", rev_type)) 
 ```
 
+```{r create-dropreason}
+rev_temp <- rev_temp |> 
+  mutate(drop_fund = ifelse(in_ff == "0", 
+                               "Excluded Fund", "Included Fund"),
+         drop_reason = case_when(
+         agency == 799 ~ "Transfer", 
+         in_ff == "0" ~ "Excluded Fund",
+         TRUE ~ NA))
+
+```
 
 
 ### Health Insurance Premiums from Employees
@@ -629,12 +653,14 @@ This was created in an attempt to help other researchers have the most complete 
 ```{r write-csvs}
 exp_temp <- exp_temp |> select(-c(data_source, activefy2025, activefy2025_rev, refund, year, federal_funded)) |> filter(expenditure > 0)
 
-write.csv(exp_temp, "budget_data_expenditures.csv")
+todaysdate = Sys.Date()
+
+write.csv(exp_temp, paste0("budget_data_exp_", todaysdate, ".csv"), na = "")
 
 
 
 rev_temp <- rev_temp |> select(-c(activefy2025, activefy2025_rev, type_assigned))
-write.csv(rev_temp, "budget_data_revenue.csv")
+write.csv(rev_temp, paste0("budget_data_rev_", todaysdate, ".csv"), na = "")
 ```
 
 
