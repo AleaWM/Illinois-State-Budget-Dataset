@@ -31,7 +31,7 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 This page describes the creation of `budget_data_rev.csv` and `budget_data_exp.csv`.
 :::
 
-This code is based on the (Everything.qmd) file used for the website and each years fiscal gap calculation, BUT it doesn't contain as many graphs or descriptions behind the code. It also has been modified slightly so that it DOES NOT drop observations that would normally be removed (e.g. principle payments, statutory transfers, etc.) during the data processing for the Fiscal Futures report.
+This code is based on the (Everything.qmd) file used for the website and each years fiscal gap calculation, BUT it doesn't contain as many graphs or descriptions behind the code. It also has been modified slightly so that it DOES NOT drop observations that would normally be removed (e.g. principal payments, statutory transfers, etc.) during the data processing for the Fiscal Futures report.
 
 **It was created purely for the purpose of making a dataset that had all the observations received from the comptrollers office, with labels to go with the fund/agency/organization/revenue source numbers, with non-duplicated fund numbers over time.**
 
@@ -91,7 +91,13 @@ exp_temp<- read_csv(file = paste0("FY", current_year, " Files/exp_temp.csv"))
 
 **Tax refunds**
 
-Aggregate expenditures: Save tax refunds as negative revenue. Code refunds to match the rev_type codes (02=income taxes, 03 = corporate income taxes, 06=sales tax, 09=motor fuel tax, 24=insurance taxes and fees, 35 = all other tax refunds).
+Aggregate expenditures: 
+- Stata methodlogy: Saved tax refunds as negative revenue.  
+- methodology for a couple years in R: excluded refunds from totals since they should cancel out in the long run (hypothetically).   
+- current methodology for fy25+: leave refund funds as is; they remain in category totals. GOMB has flagged that fund transfers from refund fund have occurred during recent years that experienced surplus refund funds. 
+
+
+Code refunds to match the rev_type codes (02=income taxes, 03 = corporate income taxes, 06=sales tax, 09=motor fuel tax, 24=insurance taxes and fees, 35 = all other tax refunds).
 
 
 ```{r tax-refunds}
@@ -107,7 +113,10 @@ tax_refund_long <- exp_temp %>%           # fund != "0401" # removes State Trust
     obj_seq_type == "99250055" ~ "06",    # sales tax refund
     fund=="0378" & object=="9925" ~ "24", # insurance privilege tax refund
     fund=="0001" & object=="9925" ~ "35", # all other taxes
-      T ~ "CHECK"))                       # if none of the items above apply to the observations, then code them as CHECK 
+    object == "9900" ~ "FY23_Rebates",
+object == "9923" | fund == "0012" ~ "09",
+fund == "0384" & object == "9925" & fy == 2023 ~ "35", 
+     T ~ "CHECK"))                       # if none of the items above apply to the observations, then code them as CHECK 
 
 
 
@@ -185,7 +194,7 @@ These items are dropped in the fiscal futures model. They have been left in for 
 
 -   object == 1993 is for interfund cash transfers
 -   agency == 799 is for statutory transfers
--   object == 1298 is for purchase of investments and is not spending EXCEPT for costs in 2010 and 2011 (and were recoded already to object == "4431"). Over 168,000 observations remain.
+-   object == 1298 is for purchase of investments and is not spending EXCEPT for costs in 2010 and 2011 (and were recoded already to object == "4431"). 
 
 ```{r transfers}
 
@@ -332,7 +341,7 @@ Debt Service expenditures include interest payment on both short-term and long-t
 exp_temp <- exp_temp %>% 
   mutate(drop_reason = ifelse(
   (object == "8841" |  object == "8811"), 
-  "Debt Escrow or Principle",   # escrow  OR  principle
+  "Debt Escrow or Principal",   # escrow  OR  principal
   drop_reason))
 
 # changed from debt_keep to exp_temp for recoding and 
@@ -427,7 +436,7 @@ exp_temp <- exp_temp |>
 # - Illinois Power Agency (445)  
 # - Labor (452)   
 # - State Lottery (458)   
-# - Veteran's Affairs (497) 
+# - Veterans' Affairs (497) 
 
   #  agency=="507"|  agency=="442" | agency=="445" | agency=="452" |agency=="458" | agency=="497" ~ "948", # other departments
 
@@ -452,7 +461,7 @@ exp_temp <- exp_temp |>
              group == "489" ~ "SERS",
              group == "478" ~ "Healthcare and Family Services",
              group == "482" ~ "Public Health",
-             group == "497" ~ "Veteran's Affairs",
+             group == "497" ~ "Veterans' Affairs",
              group == "507" ~ "GOMB",
              group == "901" ~ "STATE PENSION CONTRIBUTION",
              group == "903" ~ "DEBT SERVICE",
