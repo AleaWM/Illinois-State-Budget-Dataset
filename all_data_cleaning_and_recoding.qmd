@@ -24,6 +24,16 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 ```
 
+```{r readin-currentCSVs, warning=FALSE, message=FALSE}
+
+# # combined in past chunks called add-newest-years-data
+# 
+# allrevfiles <- read_csv(paste0("data/FY", current_year, " Files/allrevfiles_", current_year, ".csv") ) #combined but not recoded
+# 
+# allexpfiles <- read_csv(paste0("data/FY", current_year, " Files/allexpfiles_", current_year, ".csv")) #combined but not recoded
+```
+
+
 ::: {.callout-note appearance="minimal" icon="false"}
 
 ## Budget data with all observations for other researchers
@@ -50,11 +60,11 @@ Data files received include all observations through August 31 of each fiscal ye
 Code below reads in the csv files in `Fiscal-Futures-Topics/code-cleaning.qmd`   (`rev_temp.csv` and `exp_temp.csv`). These files contain all years of data combined into one file. **It does have funds or agencies tracked consistently over time.**  Do not use this file for summing Fiscal Futures categories because it is just an intermediate step before recoding revenue and expenditure categories using Fiscal Futures methodology.  
 
 
-## Inspecting new FY22 data files
+## Inspecting new FOIA budget files
 
 The numbers of funds, agencies, organizations, and revenue sources below were found by using pivot tables in the codebook files in Fiscal_Futures/data folder.
 
-This can also be done using R and grouping new files by fund, agency, source number, source names, etc.. as is done in the code below.
+This can also be done using R and grouping new files by fund, agency, source number, source names, etc. as is done in the code below.
 
 Comparing all known agencies and funds from past years to the most recent year of data tells us if any new funds, agencies, sources, etc. began to be used or if an old fund number was reused for a new function. Tracking changes over time is a crucial step in the Fiscal Futures project methodology and beneficial to all research using Illinois state budget data.
 
@@ -80,11 +90,15 @@ amnesty_words <- c("AMNESTY")
 # Expenditure & Revenue Categorization
 
 ```{r}
-current_year = 2025
+current_year = 2026
 
-rev_temp <- read_csv(file = paste0("data/", "FY", current_year, " Files/rev_temp.csv"))
+rev_temp <- read_csv(file = paste0("data/", "FY", current_year, " Files/rev_temp.csv")) |>
+  mutate(
+    in_ff = ifelse(in_ff == 1, T, F))
 
-exp_temp<- read_csv(file = paste0("data/", "FY", current_year, " Files/exp_temp.csv"))
+exp_temp<- read_csv(file = paste0("data/", "FY", current_year, " Files/exp_temp.csv")) |>
+  mutate(transfer = ifelse(transfer == 1, T, F),
+         in_ff = ifelse(in_ff == 1, T, F))
 ```
 
 ## Modify Expenditure File
@@ -101,34 +115,73 @@ Code refunds to match the rev_type codes (02=income taxes, 03 = corporate income
 
 
 ```{r tax-refunds}
-tax_refund_long <- exp_temp %>%           # fund != "0401" # removes State Trust Funds
-  filter(fund != "0401" & (object=="9910"|object=="9921"|object=="9923"|object=="9925")) %>%
-  # keeps these objects which represent revenue, insurance, treasurer,and financial and professional reg tax refunds
-  mutate(refund = case_when(
-    fund=="0278" & sequence == "00" ~ "02", # for income tax refund
-    fund=="0278" & sequence == "01" ~ "03", # tax administration and enforcement and tax operations become corporate income tax refund
-     fund == "0278" & sequence == "02" ~ "02",
-    object=="9921" ~ "21",                # inheritance tax and estate tax refund appropriation
-    object=="9923" ~ "09",                # motor fuel tax refunds
-    obj_seq_type == "99250055" ~ "06",    # sales tax refund
-    fund=="0378" & object=="9925" ~ "24", # insurance privilege tax refund
-    fund=="0001" & object=="9925" ~ "35", # all other taxes
-    object == "9900" ~ "FY23_Rebates",
-object == "9923" | fund == "0012" ~ "09",
-fund == "0384" & object == "9925" & fy == 2023 ~ "35", 
-     T ~ "CHECK"))                       # if none of the items above apply to the observations, then code them as CHECK 
+exp_temp <- exp_temp |> 
+  mutate(obj_type = str_sub(obj_seq_type, 1, 1),
+         obj_2dig = str_sub(obj_seq_type, 1, 2),
+         obj_of_exp = str_sub(obj_seq_type, 1, 3),
+         obj_of_exp = str_pad(obj_of_exp, width = 4,  "right", pad = "0"),
+        
+          item_detail = case_when(
+           obj_of_exp == "9900" ~ "9900 - One-Time Rebates",
+           obj_of_exp == "9910" ~ "9910 - Income Tax Refunds",
+           object == "9923" ~ "9923 - MFT Refunds",
+           object == "9925" ~ "9925 - Sales Tax Refunds",
+           obj_of_exp == "9920"~ "9920 - Other Tax Refunds",
+           obj_of_exp == "9930" ~ "9930 - Other Refunds",
+           obj_of_exp > 9930 ~ "9931 & Up - Other Refunds")
+  ) |> 
+  mutate(refund = ifelse(obj_seq_type >= "9900", T, F))
 
-
-
-# adds variable indicating if it was a refund or not to the exp_temp file #    
-exp_temp <- left_join(exp_temp, tax_refund_long) %>%
-  mutate(refund = ifelse(is.na(refund),"not refund", as.character(refund)))
-
-exp_temp <- exp_temp |> mutate(drop_reason = ifelse(!is.na(refund), "Refund", drop_reason))
-
-# Normally these are dropped from expenditures for Fiscal Gap calculation
-# exp_temp <- exp_temp %>% filter(refund == "Not refund")
-
+# 
+# tax_refund_long <- exp_temp %>%           # fund != "0401" # removes State Trust Funds
+#   filter(fund != "0401" & (object=="9910"|object=="9921"|object=="9923"|object=="9925")) %>%
+#   # keeps these objects which represent revenue, insurance, treasurer,and financial and professional reg tax refunds
+#   mutate(refund = case_when(
+#     fund=="0278" & sequence == "00" ~ "02", # for income tax refund
+#     fund=="0278" & sequence == "01" ~ "03", # tax administration and enforcement and tax operations become corporate income tax refund
+#      fund == "0278" & sequence == "02" ~ "02",
+#     object=="9921" ~ "21",                # inheritance tax and estate tax refund appropriation
+#     object=="9923" ~ "09",                # motor fuel tax refunds
+#     obj_seq_type == "99250055" ~ "06",    # sales tax refund
+#     fund=="0378" & object=="9925" ~ "24", # insurance privilege tax refund
+#     fund=="0001" & object=="9925" ~ "35", # all other taxes
+#     object == "9900" ~ "FY23_Rebates",
+# object == "9923" | fund == "0012" ~ "09",
+# fund == "0384" & object == "9925" & fy == 2023 ~ "35", 
+#      T ~ "CHECK"))                       # if none of the items above apply to the observations, then code them as CHECK 
+# 
+# tax_refund_long <- exp_temp %>%
+#   
+#   filter(fund != "0401" 
+#          & (object=="9910"|object=="9921"|object=="9923"|object=="9925")) %>%
+#   # keeps these objects which represent revenue, insurance, treasurer,and financial and professional reg tax refunds
+#   
+#   mutate(
+#     item_detail = case_when(
+#       fund == "0278" & sequence == "00" ~ "Income Tax Refund",
+#       fund == "0278" & sequence == "01" ~ "Corporate Income Tax Refund",
+#       fund == "0278" & sequence == "02" ~ "Income Tax Refund",
+#       
+#       object == "9921" ~ "Inheritance and Estate Tax Refund",
+#       object == "9923" ~ "Motor Fuel Tax Refund",
+#       obj_seq_type == "99250055" ~ "Sales Tax Refund",
+#       
+#       fund == "0378" & object == "9925" ~ "Insurance Privilege Tax Refund",
+#       fund == "0001" & object == "9925" ~ "All Other Taxes Refund",
+#       
+#       object == "9900" ~ "FY23 Rebates",
+#       fund == "0012" ~ "Motor Fuel Tax Refund",
+#       
+#       fund == "0384" & object == "9925" & fy == 2023 ~ "All Other Taxes Refund",
+#       
+#       TRUE ~ NA_character_
+#     )
+#   )
+# 
+# # adds variable indicating if it was a refund or not to the exp_temp file #    
+# exp_temp <- left_join(exp_temp, tax_refund_long) %>%
+#   mutate(refund = ifelse(is.na(refund),"not refund", as.character(refund)),
+#          refund_TF = if_else(is.na(refund), FALSE, TRUE))
 
 ```
 
@@ -153,7 +206,10 @@ pension_funds <- c("0472", "0473", "0477", "0479", "0481", "0755", "0786", "0787
 
 exp_temp <- exp_temp %>% 
   
+
   mutate(
+    # all pension items including things that would be "double counted" if left in aggregate  totals
+    # benefits paid to employees, state contributions, 
     pension = ifelse(object %in% c("4430","4431", "1159", "1160", 
                                    "1161", "1162", "1163","1164",
                                    "1165", "1166"), TRUE, FALSE),
@@ -161,29 +217,39 @@ exp_temp <- exp_temp %>%
     drop_reason = ifelse( 
       (object=="4430"), 
       "Benefits Paid to Employees", # pensions, annuities, benefits
-      drop_reason), 
+      NA), 
     
     pension = ifelse(
       (object=="4431") | # "Object 4431 - State Contributions; INCLUDED", # 4431 = state payments into pension fund
-    (obj_seq_type > "11590000" & obj_seq_type < "11660000") |  #~ "Object 1160-1165 Employer Contributions into Pension Fund; INCLUDED",     # objects 1159 to 1166 are all considered Retirement by Comptroller 
-(object == "4900" & fund %in% pension_funds) | # "Object 4900 - Awards/Grants; Weird 2010-2011 values" 
-(object == "1900" & fund %in% pension_funds),  #  Fund 0319 - Pension Stabilization fund in 2022
+        (obj_seq_type > "11590000" & obj_seq_type < "11660000") |     # objects 1159 to 1166 are all considered Retirement by Comptroller 
+        (object == "4900" & fund %in% pension_funds) | # "Object 4900 - Awards/Grants; Weird 2010-2011 values" 
+        (object == "1900" & fund %in% pension_funds),  #  Fund 0319 - Pension Stabilization fund in 2022
+      TRUE, pension),
     
-    TRUE, FALSE))
+    
+    item_detail = case_when(
+      object == "4431" ~ "Object 4431 - State Contributions", # 4431 = state payments into pension fund
+        (obj_seq_type > "11590000" & obj_seq_type < "11660000") ~ "Object 1160-1165 Employer Contributions into Pension Fund",     # objects 1159 to 1166 are all considered Retirement by Comptroller 
+        (object == "4900" & fund %in% pension_funds) ~ "Object 4900 - Awards/Grants; Weird 2010-2011 values", 
+        (object == "1900" & fund %in% pension_funds) ~ "Fund 0319 - Pension Stabilization Fund",
+      T ~ as.character(item_detail)
+    )
+  )
 ```
 
+
 ```{r pensions-POB}
-
-# special accounting of pension obligation bond (POB)-funded contributions to JRS, SERS, GARS, TRS 
-
-exp_temp <- exp_temp %>% 
-  # change object for 2010 and 2011, retirement expenditures were bond proceeds and would have been excluded
-  mutate(object = ifelse((pension ==TRUE & in_ff == "0"), "4431", object)) %>% 
-  # changes weird teacher & judge retirement system  pensions object to normal pension object 4431
-  mutate(pension =  ifelse(pension ==TRUE & in_ff == "0", TRUE, pension)) %>% # coded as 6 if it was supposed to be excluded. 
-  mutate(in_ff = ifelse(pension==TRUE, "1", in_ff))
-
-table(exp_temp$pension) 
+# 
+# # special accounting of pension obligation bond (POB)-funded contributions to JRS, SERS, GARS, TRS 
+# 
+# exp_temp <- exp_temp %>% 
+#   # change object for 2010 and 2011, retirement expenditures were bond proceeds and would have been excluded
+#   mutate(object = ifelse((pension == TRUE & in_ff == F), "4431", object)) %>% 
+#   # changes weird teacher & judge retirement system  pensions object to normal pension object 4431
+#   mutate(pension =  ifelse(pension == TRUE & in_ff == F, TRUE, pension)) %>% # coded as 6 if it was supposed to be excluded. 
+#   mutate(in_ff = ifelse(pension==TRUE, T, in_ff))
+# 
+# table(exp_temp$pension) 
 
 
 ```
@@ -209,11 +275,16 @@ These items are dropped in the fiscal futures model. They have been left in for 
 
 exp_temp <- exp_temp %>% 
   mutate(
+    transfer = ifelse(agency==799, T, F),
+    
     drop_reason = case_when(
-      agency == "799" ~ "Statutory Transfers",      # statutory transfers
+            agency == 799 ~ "Statutory Transfers",      # statutory transfers
+
       object == "1993"  ~ "Interfund Transfers",    # interfund cash transfers
-      object == "1298" ~ "Purchase of Investments", # purchase of investments
-      TRUE ~ drop_reason) )
+      object == "1298" ~ "Purchase of Investments", # purchase of investments,
+      agency == "799" ~ "Statutory Transfers",      # statutory transfers
+    
+      TRUE ~ as.character(drop_reason) ))
 
 ```
 
@@ -224,7 +295,7 @@ Relevant funds:
 -   Fund = 0457 is "Group insurance premium", in_ff = 1
 -   Fund = 0193 is "Local govt health insurance reserve", in=ff = 0
 -   fund = 0477 is "Community College Health Insurance", in=ff = 0.
-    -   had large amount in early years
+-   had large amount in early years
 -   Fund = 0907 = health insurance reserve, in_ff = 1
 -   Fund = 9939 is "group self-insurers' insolv", in_ff = 1
 -   Fund = 0940 is Self-Insurers security, in_ff = 0
@@ -243,31 +314,34 @@ I code group insurance observations as `drop_reason == "Group Insurance Contribu
 exp_temp <- exp_temp %>% 
   mutate(drop_reason = ifelse(
     # group insurance contributions for 1998-2005 and 2013-present
-  (fund == "0001" & (object == "1180" | object =="1900") & agency == "416" & appr_org=="20") |
-   
-     # group insurance contributions for 2006-2012
-    (fund == "0001" & object == "1180" & agency == "478" & appr_org=="80") |
-  
-  # group insurance contributions from road fund
-  # coded with 1900 for some reason??
-  (fund == "0011" & object == "1900" & agency == "416" & appr_org=="20"), 
-  "Group Insurance Contribution", drop_reason) )
-  
-  
+    (fund == "0001" & (object == "1180" | object =="1900") & agency == "416" & appr_org=="20") |
+      
+      # group insurance contributions for 2006-2012
+      (fund == "0001" & object == "1180" & agency == "478" & appr_org=="80") |
+      
+      # group insurance contributions from road fund
+      # coded with 1900 for some reason??
+      (fund == "0011" & object == "1900" & agency == "416" & appr_org=="20"), 
+    "Group Insurance Contribution", drop_reason) )
+
+
 # State employee healthcare indicator   
 exp_temp <- exp_temp |>
- # turns specific items into State Employee Healthcare 
-  mutate(group_label = 
-    ifelse(
-       # central management Bureau of benefits using health insurance reserve 
-      (fund=="0907" & (agency=="416" & appr_org=="20")) |  
+  # turns specific items into State Employee Healthcare 
+  mutate(group_name = 
+           ifelse(
+             # central management Bureau of benefits using health insurance reserve 
+             (fund=="0907" & (agency=="416" & appr_org=="20")) |  
+               
+               # agency = 478: healthcare & family services using health insurance reserve - ioc stopped using this in 2012
+               ( fund=="0907" & (agency=="478" & appr_org=="80") ), "State Employee Healthcare", NA),
          
-      # agency = 478: healthcare & family services using health insurance reserve - ioc stopped using this in 2012
-     ( fund=="0907" & (agency=="478" & appr_org=="80") ), "State Employee Healthcare", agency_name),
-    
-    # still assign fiscal future category like we normally do in the group variable
-    # defaults to agency code until manually recoded
-    group = ifelse(group_label == "State Employee Healthcare", "904", as.character(agency)) )
+         
+         # still assign fiscal future category like we normally do in the group variable
+         # defaults to agency code until manually recoded
+         group = ifelse(group_name == "State Employee Healthcare", "904", as.character(agency)) 
+         
+         )
 
 
 
@@ -281,7 +355,7 @@ Separate transfers to local from parent agencies that come from DOR(492) or Tran
 The six corresponding revenue items are:
 
 -   Local share of Personal Income Tax
-    -   Individual Income Tax Pass-Through New 2021 (source 2582).
+-   Individual Income Tax Pass-Through New 2021 (source 2582).
 -   Local share of General Sales Tax
 -   Personal Property Replacement Tax on Business Income
 -   Personal Property Replacement Tax on Public Utilities
@@ -301,21 +375,20 @@ exp_temp <- exp_temp %>%
       object=="4491" & (fund=="0188"|fund=="0189") ~ "976",
       fund=="0187" & object=="4470" ~ "976",
       fund=="0186" & object=="4470" ~ "976",
-      object=="4491" & (fund=="0413"|fund=="0414"|fund=="0415")  ~ "975", #mft to local
+      object == "4491" & (fund=="0413"|fund=="0414"|fund=="0415")  ~ "975", #mft to local
       fund == "0952"~ "975", # Added Sept 29 2022 AWM. Transportation Renewal MFT
       TRUE ~ as.character(group)),
     
-    group_label = 
+    group_name = if_else(group %in% c("971", "972", "973", "974", "975", "976", "977"), "Local Transfers", as.character(group_name)),
+    
+    item_detail = 
       case_when(
         group == "971"~ "Income Tax 1/10 to Local",
         group == "972" ~ "PPRT Transfer to Local",
         group == "975" ~ "MFT to Local",
         group == "976" ~ "GST to Local",
-        TRUE~as.character(group_label)) )|>
-      
-      
-      # local transfers are normally dropped, but documenting them in drop_reason
-      mutate(drop_reason = ifelse(group > "970" & group < "977", "Local Transfers", as.character(drop_reason)))
+        TRUE ~ as.character(item_detail))
+)
 
 ```
 
@@ -327,7 +400,8 @@ exp_temp <- exp_temp %>%
 #exp_temp <- exp_temp %>% filter(in_ff == 1) 
 
 exp_temp <- exp_temp |> 
-  mutate(drop_fund = ifelse(in_ff == 0, "Excluded Fund", "Included Fund"))
+  mutate(drop_fund = ifelse(in_ff == F, "Excluded Fund", 
+                            ifelse(in_ff == T, "Included Fund", "n/a")))
 ```
 
 **Debt Service**
@@ -340,26 +414,25 @@ Debt Service expenditures include interest payment on both short-term and long-t
 # keeping obs for other researchers.
 exp_temp <- exp_temp %>% 
   mutate(
-    drop_reason = ifelse(in_ff == 0, "Excluded Fund", NA),
     drop_reason = ifelse(
-  (object == "8841" |  object == "8811"), 
-  "Debt Escrow or Principal",   # escrow  OR  principal
-  drop_reason))
+      (object == "8841" |  object == "8811"), 
+      "Debt Escrow or Principal",   # escrow  OR  principal
+      drop_reason))
 
 # changed from debt_keep to exp_temp for recoding and 
 exp_temp <- exp_temp %>%
   mutate(
     group = ifelse(fund != "0455" & (object == "8813" | object == "8800"), "903", as.character(group)),
-    in_ff = ifelse(group == "903", 1, in_ff ))
+    in_ff = ifelse(group == "903", T, in_ff ))
 
 
 
 ```
 
 
-    Side note: That portion of the Healthcare and Family Services (or Public Aid in earlier years, agency code 478) budget for Medical (appr_organization code 65) for awards and grants (object codes 4400 and 4900). Department of Healthcare and Family Services administers medical assistance programs (e.g. Medicaid, CHIP, All Kids). The Fiscal Futures model moves Medicaid and CHIP expenditures to their own expenditure category. State funded programs remain in DHFS.
+Side note: That portion of the Healthcare and Family Services (or Public Aid in earlier years, agency code 478) budget for Medical (appr_organization code 65) for awards and grants (object codes 4400 and 4900). Department of Healthcare and Family Services administers medical assistance programs (e.g. Medicaid, CHIP, All Kids). The Fiscal Futures model moves Medicaid and CHIP expenditures to their own expenditure category. State funded programs remain in DHFS.
 
-    Side note: State CURE healthcare provider relief will remain in the Medicaid expenditure category due to the nature of it being federal funds providing public health services and funding to locations that provide public services. Uses same appropriation name of "HEALTHCARE PROVIDER RELIEF" and fund == 0793 and obj_seq_type == 49000000. So can defend including healthcare provider relief as Medicaid expenditure.
+Side note: State CURE healthcare provider relief will remain in the Medicaid expenditure category due to the nature of it being federal funds providing public health services and funding to locations that provide public services. Uses same appropriation name of "HEALTHCARE PROVIDER RELIEF" and fund == 0793 and obj_seq_type == 49000000. So can defend including healthcare provider relief as Medicaid expenditure.
 
 
 ### Add Other Fiscal Future group codes
@@ -370,14 +443,16 @@ exp_temp <- exp_temp %>%
 
 
 exp_temp <- exp_temp |>
-  #mutate(agency = as.numeric(agency) ) |>
-  # arrange(agency)|>
+  # R compares character strings lexicographically (roughly, alphabetically).
+  
+  # mutate(agency = as.numeric(agency) ) |>
+  
   mutate(
     group = case_when(
       
-      agency > "100"& agency < "200" ~ "910", # legislative
+      agency > "100" & agency < "200" ~ "910", # legislative
       
-      agency == "528"  | (agency>"200" & agency < "300") ~ "920", # judicial 
+      agency == "528"  | (agency >"200" & agency < "300") ~ "920", # judicial 
       
       ######################################################
       
@@ -394,18 +469,18 @@ exp_temp <- exp_temp |>
       (agency>"309" & agency<"400") ~ "930",    # elected officers: Governor, lt gov, attorney general, sec. of state, comptroller, treasurer
       
       agency == "586" ~ "959", # create new K-12 group
-
+      
       agency=="402" | agency=="418" | agency=="478" | agency=="444" | agency=="482" ~ as.character(agency), # aging, CFS, HFS, human services, public health
       T ~ as.character(group))
-    ) |>      
-
+  ) |>      
+  
   
   mutate(group = case_when(
     agency=="478" & (appr_org=="01" | appr_org == "65" | appr_org=="88") & (object=="4900" | object=="4400") ~ "945", # separates CHIP from health and human services and saves it as Medicaid
     
     agency == "586" & fund == "0355" ~ "945",  # 586 (Board of Edu) has special education which is part of medicaid
     
-    agency=="425" | agency=="466" | agency=="546" | agency=="569" | agency=="578" | agency=="583" | agency=="591" | agency=="592" | agency=="493" | agency=="588" ~ "941", # public safety & Corrections
+    agency=="425" | agency=="466" | agency=="546" | agency=="569" | agency=="578" | agency=="583" | agency=="591" | agency=="592" | agency == "493" | agency=="588" ~ "941", # public safety & Corrections
     
     agency=="420" | agency=="494" |  agency=="406" | agency=="557" ~ as.character(agency), # econ devt & infra, tollway
     
@@ -430,43 +505,59 @@ exp_temp <- exp_temp |>
     
     agency=="427"  ~ as.character(agency),    # employment security
     
-############################ 
-# Leaving these agencies as their own agency number for now. Had been coded to "Other departments" Group 948 in some versions of code but that hides their totals. ideally keep agencies and group smallest ones in Other Expenditures in final tables 
-
-# - GOMB (507)  
-# - Human Rights (442)  
-# - Illinois Power Agency (445)  
-# - Labor (452)   
-# - State Lottery (458)   
-# - Veterans' Affairs (497) 
-
-  #  agency=="507"|  agency=="442" | agency=="445" | agency=="452" |agency=="458" | agency=="497" ~ "948", # other departments
-
-       agency=="507" | agency=="442" | agency=="445" | agency=="452" |agency=="458" | agency=="497" ~ as.character(agency), # Were included within "other departments"
-  
-
-###########################################
+    ############################ 
+    # Leaving these agencies as their own agency number for now. Had been coded to "Other departments" Group 948 in some versions of code but that hides their totals. ideally keep agencies and group smallest ones in Other Expenditures in final tables 
     
-
-# other boards & Commissions
+    # - GOMB (507)  
+    # - Human Rights (442)  
+    # - Illinois Power Agency (445)  
+    # - Labor (452)   
+    # - State Lottery (458)   
+    # - Veterans' Affairs (497) 
+    
+    #  agency=="507"|  agency=="442" | agency=="445" | agency=="452" |agency=="458" | agency=="497" ~ "948", # other departments
+    
+    agency=="507" | agency=="442" | agency=="445" | agency=="452" |agency=="458" | agency=="497" ~ as.character(agency), # Were included within "other departments"
+    
+    
+    ###########################################
+    
+    
+    # other boards & Commissions
     agency=="503" | agency=="509" | agency=="510" | agency=="565" |agency=="517" | agency=="525" | agency=="526" | agency=="529" | agency=="537" | agency=="541" | agency=="542" | agency=="548" |  agency=="555" | agency=="558" | agency=="559" | agency=="562" | agency=="564" | agency=="568" | agency=="579" | agency=="580" | agency=="587" | agency=="590" | agency=="527" | agency=="585" | agency=="567" | agency=="571" | agency=="575" | agency=="540" | agency=="576" | agency=="564" | agency=="534" | agency=="520" | agency=="506" | agency == "533" ~ "949", 
     
     T ~ as.character(group))) |>
   
   mutate(group_name = 
            case_when(
+             group == "402" ~ "Aging",
+             group == "406" ~ "Agriculture",
              group == "416" ~ "Central Management",
+             group == "418" ~ "Children & Family Services",
+             group == "420" ~ "Commerce & Economic Opportunity",
+             group == "422" ~ "Natural Resources",
+             group == "426" ~ "Corrections",
+             group == "427" ~ "Employment Security",
              group == "442" ~ "Human Rights",
-             group == "445" ~ "Illinois Power Agency",
+             group == "444" ~ "Human Services",
+             group == "445" ~ "IL Power Agency",
              group == "452" ~ "Labor",
              group == "458" ~ "State Lottery",
+             group == "480" ~ "Early Childhood", 
              group == "489" ~ "SERS",
-             group == "478" ~ "Healthcare and Family Services",
+             group == "478" ~ "Healthcare and Family Services (net Medicaid)",
              group == "482" ~ "Public Health",
+             group == "492" ~ "Revenue",
+             group == "493" ~ "Public Safety",
+             group == "494" ~ "Transportation",
              group == "497" ~ "Veterans' Affairs",
              group == "507" ~ "GOMB",
+             group == "532" ~ "EPA",
+             group == "557" ~ "IL State Tollway",
+             group == "799" ~ "Statutory Transfers",
              group == "901" ~ "State Pension Contribution",
              group == "903" ~ "Debt Service",
+             group == "904" ~ "State Employee Healthcare",
              group == "910" ~ "Legistlative"  ,
              group == "920" ~ "Judicial" ,
              group == "930" ~ "Elected Officers" , 
@@ -480,8 +571,12 @@ exp_temp <- exp_temp |>
              group == "948" ~ "Other Departments" ,
              group == "949" ~ "Other Boards & Commissions" ,
              group == "959" ~ "K-12 Education" ,
-             group == "960" ~ "University Education" ,
-             group == agency ~ as.character(agency_name),
+             group == "960" ~ "University Education",
+             group == "970" ~ "Local Govt Transfers",
+             is.na(group_name) & in_ff== T ~ as.character(agency_name),
+             !is.na(group_name) & in_ff== T ~ as.character(group_name),
+             # group == agency ~ as.character(agency_name),
+             # in_ff==TRUE & pension_funds == 0 & is.na(drop_reason) ~ as.character(agency_name),
              TRUE ~ "Check name"),
          year = fy)
 
@@ -489,7 +584,7 @@ exp_temp <- exp_temp |>
 # ideally this would be fixed in other steps
 # don't have time to check it now 
 exp_temp <- exp_temp |>
-    mutate(fund_cat_name =
+  mutate(fund_cat_name =
            case_when(
              fund_cat_name == "General Fund" ~ "General Funds",
              fund_cat_name == "REVOLVING FUNDS" ~ "Revolving Funds",
@@ -498,7 +593,7 @@ exp_temp <- exp_temp |>
          federal_funded = case_when(
            fund_cat_name == "Federal Trust Funds" ~ "Federal Funds",
            group_name == "Medicaid" & fund_cat_name == "General Funds" ~ "Federal Funds",
-          T ~ "State Funds"
+           T ~ "State Funds"
            
          ))
 
@@ -519,8 +614,10 @@ exp_temp <- exp_temp |>
   mutate(approp_number = obj_seq_type) |>
   group_by(agency, appr_org, fund) |> 
   arrange(desc(year)) |>
-    fill(wh_approp_name, .direction = "downup") %>%
-ungroup()
+  fill(wh_approp_name, .direction = "downup") %>%
+  ungroup() |>
+  mutate(drop_reason = ifelse(agency_name == "STATUTORY TRANSFERS", "STATUTORY TRANSFERS", drop_reason),
+         )
 ```
 
 ::: { .callout-important appearance="minimal" icon="false"}
@@ -537,7 +634,7 @@ rev_temp <- rev_temp |>
   mutate(agency = case_when(
     (agency=="438"| agency=="475" |agency == "505") ~ "440",
     # financial institution &  professional regulation &
-     # banks and real estate  --> coded as  financial and professional reg
+    # banks and real estate  --> coded as  financial and professional reg
     agency == "473" ~ "588", # nuclear safety moved into IEMA
     (agency =="531" | agency =="577") ~ "532", # coded as EPA
     (agency =="556" | agency == "538") ~ "406", # coded as agriculture
@@ -571,12 +668,15 @@ rev_temp <- rev_temp |>
 
 ```{r create-dropreason}
 rev_temp <- rev_temp |> 
-  mutate(drop_fund = ifelse(in_ff == "0", 
-                               "Excluded Fund", "Included Fund"),
-         drop_reason = case_when(
-         agency == 799 ~ "Transfer", 
-         in_ff == "0" ~ "Excluded Fund",
-         TRUE ~ NA))
+  mutate(
+    drop_fund = ifelse(in_ff == F, 
+                       "Excluded Fund", "Included Fund"),
+    
+    drop_reason = case_when(
+      agency == 799 ~ "Transfer", 
+      
+      in_ff == F ~ "Excluded Fund",
+      TRUE ~ NA))
 
 ```
 
@@ -599,13 +699,13 @@ rev_temp <- rev_temp |>
 ```{r}
 rev_temp <- rev_temp |> 
   mutate(
-# adds more rev_type codes
+    # adds more rev_type codes
     rev_type = case_when(
-      fund =="0427" ~ "12", # pub utility tax
-      fund == "0742" | fund == "0473" ~ "24", # insurance and fees
-      fund == "0976" ~ "36",# receipts from rev producing
-      fund == "0392" |fund == "0723" ~ "39", # licenses and fees
-      fund == "0656" ~ "78", #all other rev sources
+      fund =="0427" & in_ff== T ~ "12", # pub utility tax
+      fund == "0742" & in_ff== T | fund == "0473" ~ "24", # insurance and fees
+      fund == "0976" & in_ff== T ~ "36",# receipts from rev producing
+      fund == "0392" |fund == "0723" & in_ff== T ~ "39", # licenses and fees
+      fund == "0656" & in_ff== T ~ "78", #all other rev sources
       TRUE ~ as.character(rev_type)))
 # if not mentioned, then rev_type as it was
 ```
@@ -641,7 +741,8 @@ drop_type <- c("32", "45", "51",
 # bond issue proceeds, interagency receipts, cook IGT, Prior year refunds.
 
 rev_temp <- rev_temp |> 
-  mutate(drop_reason = ifelse(rev_type %in% drop_type, "Dropped Category", drop_reason))
+  mutate(drop_reason = ifelse(rev_type %in% drop_type, "Dropped Category", drop_reason),
+         )
 ```
 
 All expenditures recoded but not aggregated: Allows for inspection of individual expenditures within larger categories. This stage of the data is extremely useful for any researcher interested in Illinois fiscal health. This version of data produced by this file still includes observations that would normally be dropped.
@@ -651,16 +752,19 @@ This was created in an attempt to help other researchers have the most complete 
 
 
 ```{r write-csvs}
-exp_temp <- exp_temp |> select(-c(data_source, activefy2025, activefy2025_rev, refund, year, federal_funded)) |> filter(expenditure > 0)
-
 todaysdate = Sys.Date()
+
+exp_temp <- exp_temp |> select(-c(data_source, activefy2025, activefy2025_rev, refund, year, federal_funded)) |> filter(expenditure > 0)
 
 write.csv(exp_temp, paste0("budget_data_exp_", todaysdate, ".csv"), na = "")
 
-
-
 rev_temp <- rev_temp |> select(-c(activefy2025, activefy2025_rev, type_assigned))
 write.csv(rev_temp, paste0("budget_data_rev_", todaysdate, ".csv"), na = "")
+
+
+write.csv(exp_temp, "budget_data_exp.csv", na = "")
+
+write.csv(rev_temp, "budget_data_rev.csv", na = "")
 ```
 
 
